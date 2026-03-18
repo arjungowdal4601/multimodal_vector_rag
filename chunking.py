@@ -215,7 +215,14 @@ def _read_page(page_map: Dict[int, Path], page_no: int) -> Dict[str, Any] | None
     }
 
 
-def _save_page_json(page_json_path: Path, per_page_chunks: Dict[str, Any], fallback_page_no: int) -> None:
+def _save_page_json(
+    page_json_path: Path,
+    per_page_chunks: Dict[str, Any],
+    fallback_page_no: int,
+    pdf_name: str,
+    doc_assets_path: str,
+) -> None:
+    
     cleaned_chunks = {}
 
     for idx, chunk_data in enumerate(per_page_chunks.values(), start=1):
@@ -232,6 +239,10 @@ def _save_page_json(page_json_path: Path, per_page_chunks: Dict[str, Any], fallb
             "content": chunk_data.get("content", ""),
             "refreshed_content": chunk_data.get("refreshed_content", ""),
             "source": src,
+            "metadata_addition": {
+                "pdf_name": pdf_name,
+                "doc_assets_path": doc_assets_path,
+            },
         }
 
     page_json_path.write_text(
@@ -244,7 +255,9 @@ def chunk_markdown_with_llm(
     pdf_path: str | Path,
 ) -> Path:
     
-    asset_root = Path(f"{Path(pdf_path).stem}_doc_assets")
+    pdf_name = Path(pdf_path).stem
+    doc_assets_path_str = f"{pdf_name}_doc_assets"
+    asset_root = Path(doc_assets_path_str)
     page_images_dir = asset_root / "page_images"
     page_md_dir = asset_root / "pages_md"
     page_json_dir = asset_root / "page_wise_json"
@@ -264,6 +277,12 @@ def chunk_markdown_with_llm(
         )
 
         page_json_path = page_json_dir / f"page_{page_no:04d}.json"
-        _save_page_json(page_json_path, per_page_chunks, fallback_page_no=page_no)
+        _save_page_json(
+            page_json_path=page_json_path,
+            per_page_chunks=per_page_chunks,
+            fallback_page_no=page_no,
+            pdf_name=pdf_name,
+            doc_assets_path=doc_assets_path_str,
+        )
 
     return True

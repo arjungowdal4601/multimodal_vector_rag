@@ -1,31 +1,47 @@
 {
   "chunk_1": {
     "content": "Figure 1: The Transformer - model architecture.\n\nThe figure is a block diagram of the Transformer sequence-to-sequence architecture with an encoder on the left and a decoder on the right, showing how input tokens are converted into output token probabilities. At the bottom left, “Inputs” flow into an “Input Embedding” block, and a “Positional Encoding” signal is added (shown by a plus sign in a circle) before entering the encoder stack. The encoder is drawn as a repeated module labeled “N×”, meaning the same encoder layer is stacked N times; each encoder layer contains a “Multi-Head Attention” sublayer followed by an “Add & Norm” block (residual connection plus normalization), then a “Feed Forward” sublayer followed by another “Add & Norm” block.\n\nOn the bottom right, “Outputs (shifted right)” flow into an “Output Embedding” block, and another “Positional Encoding” is added before entering the decoder stack. The decoder is also repeated “N×” times and each decoder layer contains three main sublayers in order: “Masked Multi-Head Attention” (self-attention with masking to prevent attending to future positions), then “Multi-Head Attention” (attention over the encoder’s output, often called encoder–decoder attention), and then a “Feed Forward” network. Each of these sublayers is wrapped with an “Add & Norm” block, indicating residual connections and normalization around each sublayer. Curved arrows around the attention blocks depict the residual/skip pathways feeding into the “Add & Norm” operations.\n\nAt the top of the decoder stack, the final decoder representation goes through a “Linear” layer and then a “Softmax” layer to produce “Output Probabilities,” indicating a probability distribution over the next output token at each position. The overall flow highlights that the encoder processes the entire input sequence into contextual representations, while the decoder generates outputs autoregressively using masked self-attention plus attention to the encoder output.",
-    "refreshed_content": "Figure 1 depicts the Transformer encoder–decoder architecture. Inputs are tokenized, passed through an input embedding, and combined (added) with positional encodings before entering an encoder stack repeated N times. Each encoder layer consists of (1) multi-head self-attention followed by Add & Norm (residual connection + layer normalization), then (2) a position-wise feed-forward network followed by another Add & Norm.\n\nOn the decoder side, the previous outputs (shifted right) are embedded and added with positional encodings, then processed by a decoder stack repeated N times. Each decoder layer has three sublayers, each wrapped with Add & Norm: (1) masked multi-head self-attention to prevent attending to future positions, (2) encoder–decoder (cross) multi-head attention over the encoder outputs, and (3) a feed-forward network. The final decoder states are mapped through a linear layer and softmax to produce output-token probability distributions, enabling autoregressive generation conditioned on encoder representations.",
+    "refreshed_content": "Figure 1 depicts the Transformer seq2seq architecture with an encoder stack and a decoder stack. Inputs are embedded and combined with positional encodings before entering an encoder composed of N identical layers. Each encoder layer applies (1) multi-head self-attention and then (2) a position-wise feed-forward network; both sublayers are surrounded by residual connections and an Add & Norm block (residual + normalization).\n\nOn the decoder side, previous outputs (shifted right) are embedded, positional encodings are added, and the result is passed through N identical decoder layers. Each decoder layer has three sublayers: (1) masked multi-head self-attention (prevents attending to future positions), (2) encoder–decoder multi-head attention over the encoder outputs, and (3) a feed-forward network; each is wrapped with residual connections and Add & Norm.\n\nFinally, the decoder’s top representation is projected through a linear layer and softmax to yield output token probability distributions, reflecting autoregressive generation conditioned on encoder representations.",
     "source": [
       3
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   },
   "chunk_2": {
     "content": "wise fully connected feed-forward network. We employ a residual connection [10] around each of the two sub-layers, followed by layer normalization [1]. That is, the output of each sub-layer is LayerNorm( x +Sublayer( x )) , where Sublayer( x ) is the function implemented by the sub-layer itself. To facilitate these residual connections, all sub-layers in the model, as well as the embedding layers, produce outputs of dimension d model = 512 .\n\nDecoder: The decoder is also composed of a stack of N = 6 identical layers. In addition to the two sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head attention over the output of the encoder stack. Similar to the encoder, we employ residual connections around each of the sub-layers, followed by layer normalization. We also modify the self-attention sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position i can depend only on the known outputs at positions less than i .",
-    "refreshed_content": "The Transformer uses residual connections and layer normalization around each sublayer. Concretely, for an input x, each sublayer outputs:\nLayerNorm(x + Sublayer(x)),\nwhere Sublayer(x) is the computation performed by that sublayer (e.g., attention or feed-forward). To make these residual additions valid throughout the network, all sublayers and embedding layers produce vectors of the same dimensionality, d_model = 512.\n\nThe decoder is a stack of N = 6 identical layers. Compared to an encoder layer (which has two sublayers), each decoder layer adds a third sublayer that performs multi-head attention over the encoder stack output (encoder–decoder attention). As in the encoder, residual connections and layer normalization wrap each sublayer. The decoder’s self-attention is modified with masking so a position cannot attend to subsequent (future) positions; together with shifting the output embeddings by one position, this enforces that the prediction at position i depends only on outputs at positions < i.",
+    "refreshed_content": "The Transformer applies residual connections and layer normalization around each sublayer. For an input x to a sublayer, the layer output is computed as:\n\nLayerNorm(x + Sublayer(x)),\n\nwhere Sublayer(x) denotes the sublayer’s function (e.g., attention or feed-forward). To make residual addition valid throughout the network, all sublayers and embedding layers output vectors with the same dimensionality, d_model = 512.\n\nThe decoder consists of a stack of N = 6 identical layers. Compared to an encoder layer (which has two sublayers), each decoder layer adds a third sublayer that performs multi-head attention over the encoder stack outputs (encoder–decoder attention). As in the encoder, each decoder sublayer is wrapped with a residual connection followed by layer normalization. The decoder’s self-attention is masked so a position cannot attend to later positions; together with shifting the output embeddings by one position, this ensures that predicting position i depends only on outputs at positions < i.",
     "source": [
       3
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   },
   "chunk_3": {
     "content": "## 3.2 Attention\n\nAn attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values, and output are all vectors. The output is computed as a weighted sum of the values, where the weight assigned to each value is computed by a compatibility function of the query with the corresponding key.",
-    "refreshed_content": "Attention is defined as a function that takes a query vector and a set of key–value vector pairs and returns an output vector. The output is a weighted sum of the value vectors, where each weight is determined by a compatibility score between the query and the corresponding key (i.e., how well the query matches each key).",
+    "refreshed_content": "Attention is a function that takes a query vector and a set of key–value vector pairs and returns an output vector. It computes a weighted sum of the value vectors, where each weight is determined by a compatibility score between the query and the corresponding key.",
     "source": [
       3
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   },
   "chunk_4": {
     "content": "## 3.2.1 Scaled Dot-Product Attention\n\nWe call our particular attention \"Scaled Dot-Product Attention\" (Figure 2). The input consists of queries and keys of dimension d k , and values of dimension d v . We compute the dot products of the\n\nquery with all keys, divide each by √ d k , and apply a softmax function to obtain the weights on the values.",
-    "refreshed_content": "Scaled dot-product attention (referenced as Figure 2) operates on queries Q and keys K with dimensionality d_k and values V with dimensionality d_v. It computes dot-product similarity scores between each query and all keys, scales each score by 1/√d_k, and then applies a softmax to convert the scaled scores into attention weights over the values.",
+    "refreshed_content": "Scaled dot-product attention (referenced as Figure 2) operates on queries Q and keys K with dimensionality d_k, and values V with dimensionality d_v. For each query, it computes dot products with all keys (similarity scores), scales each score by 1/√d_k, and then applies a softmax over the scaled scores to obtain attention weights used to combine the values.",
     "source": [
       3,
       4
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   }
 }

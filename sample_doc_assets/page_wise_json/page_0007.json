@@ -1,44 +1,68 @@
 {
   "chunk_1": {
     "content": "the input sequence centered around the respective output position. This would increase the maximum path length to O ( n/r ) . We plan to investigate this approach further in future work.\n\nA single convolutional layer with kernel width k < n does not connect all pairs of input and output positions. Doing so requires a stack of O ( n/k ) convolutional layers in the case of contiguous kernels, or O ( log k ( n )) in the case of dilated convolutions [15], increasing the length of the longest paths between any two positions in the network. Convolutional layers are generally more expensive than recurrent layers, by a factor of k . Separable convolutions [6], however, decrease the complexity considerably, to O ( k · n · d + n · d 2 ) . Even with k = n , however, the complexity of a separable convolution is equal to the combination of a self-attention layer and a point-wise feed-forward layer, the approach we take in our model.\n\nAs side benefit, self-attention could yield more interpretable models. We inspect attention distributions from our models and present and discuss examples in the appendix. Not only do individual attention heads clearly learn to perform different tasks, many appear to exhibit behavior related to the syntactic and semantic structure of the sentences.",
-    "refreshed_content": "The authors discuss connectivity and computational trade-offs between convolutions and self-attention. Using a restricted attention mechanism centered on each output position would increase maximum path length to O(n/r), and is left for future work. A single convolution with kernel width k<n cannot connect every input-output position pair; achieving full connectivity requires stacking O(n/k) layers for contiguous kernels or O(log_k(n)) layers for dilated convolutions, which increases the longest path length between positions. Convolutions are typically k times more expensive than recurrent layers. Separable convolutions reduce complexity to O(k·n·d + n·d^2), but even with k=n their complexity matches that of a self-attention layer plus a point-wise feed-forward layer (the Transformer’s approach). Additionally, self-attention may improve interpretability: attention heads often specialize in different functions and can reflect syntactic and semantic sentence structure, as shown via attention distribution analyses in the appendix.",
+    "refreshed_content": "Using local neighborhoods centered around each output position can increase the maximum dependency path length to O(n/r), and the authors leave further investigation of that idea for future work.\n\nFor convolutions: one convolutional layer with kernel width k<n cannot connect every input position to every output position. To achieve full connectivity requires stacking many layers—O(n/k) layers for contiguous kernels, or O(log_k(n)) layers for dilated convolutions [15]—which increases the longest path length between positions. Convolutions are typically more expensive than recurrent layers by a factor of k. Separable convolutions [6] reduce the compute to O(k·n·d + n·d^2); however, even with k=n their complexity matches the combined cost of a self-attention layer plus a position-wise feed-forward layer (the architecture used in this model).\n\nA further advantage of self-attention is interpretability: examining attention distributions (examples discussed in the appendix) shows that different attention heads specialize in different behaviors, often aligning with syntactic and semantic sentence structure.",
     "source": [
       7
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   },
   "chunk_2": {
     "content": "## 5 Training\n\nThis section describes the training regime for our models.",
-    "refreshed_content": "Section 5 introduces the training setup used for the models and states that it will describe the overall training regime.",
+    "refreshed_content": "Section 5 introduces the training setup used for the proposed models and outlines the overall training regime.",
     "source": [
       7
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   },
   "chunk_3": {
     "content": "## 5.1 Training Data and Batching\n\nWe trained on the standard WMT 2014 English-German dataset consisting of about 4.5 million sentence pairs. Sentences were encoded using byte-pair encoding [3], which has a shared sourcetarget vocabulary of about 37000 tokens. For English-French, we used the significantly larger WMT 2014 English-French dataset consisting of 36M sentences and split tokens into a 32000 word-piece vocabulary [31]. Sentence pairs were batched together by approximate sequence length. Each training batch contained a set of sentence pairs containing approximately 25000 source tokens and 25000 target tokens.",
-    "refreshed_content": "Training data and batching: For WMT 2014 English→German, the model is trained on ~4.5M sentence pairs using byte-pair encoding (BPE) with a shared source–target vocabulary of ~37,000 tokens. For WMT 2014 English→French, the much larger 36M-sentence dataset is used with a 32,000 word-piece vocabulary. Mini-batches group sentence pairs by similar (approximate) sequence length, with each batch containing roughly 25k source tokens and 25k target tokens.",
+    "refreshed_content": "Training data and batching: For EN-DE, the model is trained on WMT 2014 English–German with ~4.5M sentence pairs, using byte-pair encoding (BPE) [3] with a shared source–target vocabulary of about 37,000 tokens. For EN-FR, it uses WMT 2014 English–French with 36M sentence pairs, tokenized into a 32,000 word-piece vocabulary [31]. Batches are constructed by grouping sentence pairs of similar (approximate) sequence length; each batch contains roughly 25,000 source tokens and 25,000 target tokens.",
     "source": [
       7
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   },
   "chunk_4": {
     "content": "## 5.2 Hardware and Schedule\n\nWe trained our models on one machine with 8 NVIDIA P100 GPUs. For our base models using the hyperparameters described throughout the paper, each training step took about 0.4 seconds. We trained the base models for a total of 100,000 steps or 12 hours. For our big models,(described on the bottom line of table 3), step time was 1.0 seconds. The big models were trained for 300,000 steps (3.5 days).",
-    "refreshed_content": "Hardware and training schedule: Models are trained on a single machine with 8 NVIDIA P100 GPUs. With the paper’s base hyperparameters, training takes ~0.4 s per step and runs for 100,000 steps (~12 hours). The larger “big” configuration (referenced as the bottom line of Table 3) takes ~1.0 s per step and is trained for 300,000 steps (~3.5 days).",
+    "refreshed_content": "Hardware and training schedule: Models are trained on a single machine with 8 NVIDIA P100 GPUs. With the paper’s base hyperparameters, each step takes ~0.4 s and training runs for 100,000 steps (about 12 hours). For the larger “big” configuration (referenced as the bottom line of Table 3), each step takes ~1.0 s and training runs for 300,000 steps (about 3.5 days).",
     "source": [
       7
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   },
   "chunk_5": {
     "content": "## 5.3 Optimizer\n\nWe used the Adam optimizer [17] with β 1 = 0 . 9 , β 2 = 0 . 98 and glyph[epsilon1] = 10 -9 . We varied the learning rate over the course of training, according to the formula:\n\n![Formula](formula_images/formula-6.png)\n\nLaTeX: \\(\\mathrm{lrate}=d_{\\text{model}}^{-0.5}\\cdot \\min(\\mathrm{step\\_num}^{-0.5},\\, \\mathrm{step\\_num}\\cdot \\mathrm{warmup\\_steps}^{-1.5})\\)\n\nThis defines a learning-rate schedule (\\(\\mathrm{lrate}\\)) that scales with the model dimension \\(d_{\\text{model}}\\) and uses the minimum of two step-dependent terms: one that decays as \\(\\mathrm{step\\_num}^{-0.5}\\) and one that increases linearly with \\(\\mathrm{step\\_num}\\) while being scaled by \\(\\mathrm{warmup\\_steps}^{-1.5}\\).\n\nThis corresponds to increasing the learning rate linearly for the first warmup \\_ steps training steps, and decreasing it thereafter proportionally to the inverse square root of the step number. We used warmup \\_ steps = 4000 .",
-    "refreshed_content": "Optimizer and learning-rate schedule: Training uses Adam with β1=0.9, β2=0.98, and ε=10^-9. The learning rate is scheduled as\nlrate = d_model^{-0.5} · min(step_num^{-0.5}, step_num · warmup_steps^{-1.5}).\nThis scales the learning rate by the inverse square root of the model dimension d_model and applies a warmup strategy: the learning rate increases linearly during the first warmup_steps updates and then decays proportionally to step_num^{-0.5}. The warmup length is warmup_steps=4000.",
+    "refreshed_content": "Optimizer and learning-rate schedule: Training uses Adam [17] with β1=0.9, β2=0.98, and ε=10^-9. The learning rate is scheduled as\n\nlrate = d_model^(-0.5) · min(step_num^(-0.5), step_num · warmup_steps^(-1.5)).\n\nThis scales the learning rate by the inverse square root of the model dimension d_model and takes the minimum of (a) an inverse-square-root decay term step_num^(-0.5) and (b) a linear warmup term step_num · warmup_steps^(-1.5). Practically, the learning rate increases linearly for the first warmup_steps training steps and then decays proportional to 1/√step_num. The warmup is set to warmup_steps=4000.",
     "source": [
       7
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   },
   "chunk_6": {
     "content": "## 5.4 Regularization\n\nWe employ three types of regularization during training:\n\nResidual Dropout We apply dropout [27] to the output of each sub-layer, before it is added to the sub-layer input and normalized. In addition, we apply dropout to the sums of the embeddings and the positional encodings in both the encoder and decoder stacks. For the base model, we use a rate of P drop = 0 . 1 .",
-    "refreshed_content": "Regularization (start of Section 5.4): The paper states that three regularization methods are used during training. The first described is residual dropout: dropout is applied to each sub-layer’s output before adding it back to the residual connection and applying normalization. Dropout is also applied to the combined token embeddings plus positional encodings in both encoder and decoder. For the base model, the dropout rate is P_drop=0.1.",
+    "refreshed_content": "Regularization (beginning): The training procedure uses three forms of regularization. First, “Residual Dropout”: dropout [27] is applied to each sub-layer’s output before adding it back to the residual stream and applying normalization. Dropout is also applied to the combined embedding-plus-positional-encoding inputs in both the encoder and decoder stacks. For the base model, the dropout rate is P_drop=0.1.",
     "source": [
       7
-    ]
+    ],
+    "metadata_addition": {
+      "pdf_name": "sample",
+      "doc_assets_path": "sample_doc_assets"
+    }
   }
 }
