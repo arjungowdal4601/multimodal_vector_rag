@@ -4,6 +4,9 @@ import re
 import base64
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from typing import List
+from pydantic import BaseModel, Field
+
 
 import chromadb
 import streamlit as st
@@ -26,15 +29,13 @@ if not OPENAI_API_KEY:
 # Change these if your local folders / collection names differ
 # ==========================================================
 EMBED_MODEL = "text-embedding-3-large"
-CHAT_MODEL = "gpt-4o-mini"
+CHAT_MODEL = "gpt-5"
 
 CHROMA_PATH = "vector_db/chroma_db"
 CHROMA_COLLECTION_NAME = "embeddings_db"   # change to "embedding" if that is your real non-empty collection
 PAGE_IMAGES_DIR = Path("sample_doc_assets/page_images")
 
-TOP_K = 6
-MAX_IMAGES_PER_SUBQUESTION = 4
-MAX_TOTAL_IMAGES_TO_DISPLAY = 8
+TOP_K = 4
 
 
 # ==========================================================
@@ -156,20 +157,6 @@ def find_page_image(page_no: int) -> Optional[Path]:
     return None
 
 
-def dedupe_strings_keep_order(items: List[str]) -> List[str]:
-    seen = set()
-    out = []
-    for item in items:
-        clean = item.strip()
-        if not clean:
-            continue
-        if clean.lower() in seen:
-            continue
-        seen.add(clean.lower())
-        out.append(clean)
-    return out
-
-
 def dedupe_images_keep_order(images: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     seen_pages = set()
     out = []
@@ -182,78 +169,62 @@ def dedupe_images_keep_order(images: List[Dict[str, Any]]) -> List[Dict[str, Any
     return out
 
 
-def heuristic_split_query(user_query: str) -> List[str]:
-    text = " ".join(user_query.strip().split())
-    if not text:
-        return []
-
-    # First split by question marks and semicolons
-    first_pass = re.split(r"\?\s*|;\s*|\n+", text)
-    first_pass = [p.strip(" ,") for p in first_pass if p.strip(" ,")]
-
-    if len(first_pass) > 1:
-        return dedupe_strings_keep_order(first_pass)
-
-    # Conservative fallback.
-    # We split only on stronger multi-intent phrases, not every "and".
-    patterns = [
-        r"\s+and also\s+",
-        r"\s+also\s+",
-        r"\s+as well as\s+",
-    ]
-
-    parts = [text]
-    for pattern in patterns:
-        next_parts = []
-        for part in parts:
-            split_parts = re.split(pattern, part, flags=re.IGNORECASE)
-            split_parts = [p.strip(" ,") for p in split_parts if p.strip(" ,")]
-            next_parts.extend(split_parts)
-        parts = next_parts
-
-    return dedupe_strings_keep_order(parts) if parts else [text]
-
 
 # ==========================================================
 # 5. Query decomposition + rephrasing
 # ==========================================================
+
+class SplitQuestions(BaseModel):
+    sub_questions: List[str] = Field(
+        description="Atomic sub-questions extracted from the user query"
+    )
+
+
 def split_user_query(user_query: str) -> List[str]:
-    prompt = [
-        SystemMessage(
-            content=(
-                "Split the user's input into atomic sub-questions only when it clearly contains multiple asks. "
-                "If it is really one question, return one item only.\n\n"
-                "Return ONLY valid JSON with this exact schema:\n"
-                '{"sub_questions": ["..."]}\n\n'
-                "Rules:\n"
-                "- Preserve the original meaning.\n"
-                "- Do not invent new questions.\n"
-                "- Do not over-split a single concept into many parts.\n"
-                "- Keep each sub-question short and standalone.\n"
-                "- No markdown."
-            )
-        ),
-        HumanMessage(content=user_query),
-    ]
+    splitter_llm = llm.with_structured_output(SplitQuestions)
 
     try:
-        response = llm.invoke(prompt)
-        parsed = safe_json_loads(response.content.strip())
-
-        if isinstance(parsed, dict) and isinstance(parsed.get("sub_questions"), list):
-            items = [
-                str(item).strip()
-                for item in parsed["sub_questions"]
-                if str(item).strip()
+        result = splitter_llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "Split the user's input into atomic sub-questions only when it clearly contains multiple asks.\n"
+                        "If it is really one question, return exactly 1.\n"
+                        "Never return more than 5 sub-questions.\n\n"
+                        "Rules:\n"
+                        "- Preserve the original meaning.\n"
+                        "- Do not invent new questions.\n"
+                        "- Do not over-split a single concept into many parts.\n"
+                        "- If two phrases belong to the same concept, keep them together.\n"
+                        "- Keep each sub-question short and standalone.\n"
+                        "- question_count must exactly match the number of returned sub_questions.\n"
+                        "- Prefer fewer questions when uncertain."
+                    )
+                ),
+                HumanMessage(content=user_query),
             ]
-            items = dedupe_strings_keep_order(items)
-            if items:
-                return items
-    except Exception:
-        pass
+        )
 
-    fallback = heuristic_split_query(user_query)
-    return fallback if fallback else [user_query]
+        items = [q.strip() for q in result.sub_questions if q.strip()]
+
+        # # hard safety cap
+        # if not items:
+        #     return [user_query]
+
+        # items = items[:5]
+
+        # # if model says 1, trust that and keep only first
+        # if getattr(result, "question_count", None) == 1:
+        #     return [items[0]]
+
+        # # keep count aligned
+        # expected = max(1, min(5, int(getattr(result, "question_count", len(items)))))
+        # items = items[:expected]
+
+        return items if items else [user_query]
+
+    except Exception:
+        return [user_query]
 
 
 def rephrase_query(sub_question: str) -> str:
@@ -267,12 +238,10 @@ def rephrase_query(sub_question: str) -> str:
         HumanMessage(content=sub_question),
     ]
 
-    try:
-        response = llm.invoke(prompt)
-        text = str(response.content).strip()
-        return text or sub_question
-    except Exception:
-        return sub_question
+    response = llm.invoke(prompt)
+    text = str(response.content).strip()
+    return text or sub_question
+
 
 
 # ==========================================================
@@ -320,7 +289,7 @@ def load_page_images_from_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str,
         pages.extend(chunk.get("pages", []))
 
     images: List[Dict[str, Any]] = []
-    for page_no in sorted(set(pages))[:MAX_IMAGES_PER_SUBQUESTION]:
+    for page_no in sorted(set(pages)):
         image_path = find_page_image(page_no)
         if not image_path:
             continue
@@ -512,7 +481,7 @@ def run_pipeline(user_query: str) -> Dict[str, Any]:
         "sub_questions": sub_questions,
         "results": results,
         "final_answer": final_answer,
-        "all_images": dedupe_images_keep_order(all_images)[:MAX_TOTAL_IMAGES_TO_DISPLAY],
+        "all_images": dedupe_images_keep_order(all_images),
     }
 
 
@@ -581,18 +550,6 @@ def main() -> None:
     st.write(
         "Flow: split query → rephrase each part → retrieve per part → answer per part → merge final answer"
     )
-
-    with st.sidebar:
-        st.markdown("### Config")
-        st.write(f"**CHROMA_PATH**: `{CHROMA_PATH}`")
-        st.write(f"**COLLECTION**: `{CHROMA_COLLECTION_NAME}`")
-        st.write(f"**PAGE_IMAGES_DIR**: `{PAGE_IMAGES_DIR}`")
-        st.write(f"**TOP_K**: `{TOP_K}`")
-
-        try:
-            st.write(f"**Collection count**: `{collection.count()}`")
-        except Exception as e:
-            st.error(f"Could not read collection count: {e}")
 
     user_query = st.text_area(
         "Ask your question",
