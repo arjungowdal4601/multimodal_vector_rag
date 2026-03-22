@@ -334,7 +334,6 @@ def build_chunk_context(chunks: List[Dict[str, Any]]) -> str:
 
 def answer_subquestion(
     sub_question: str,
-    retrieval_query: str,
     chunks: List[Dict[str, Any]],
     page_images: List[Dict[str, Any]],
 ) -> str:
@@ -367,7 +366,6 @@ def answer_subquestion(
         "- End with exactly one line: Sources used: <page numbers only or None>\n"
         "- Do not invent page numbers.\n\n"
         f"Sub-question:\n{sub_question}\n\n"
-        f"Retrieval query used:\n{retrieval_query}\n\n"
         f"Pages available from chunks/images:\n{pages_available if pages_available else 'None'}\n\n"
         f"Retrieved context:\n{context_text}"
     )
@@ -455,12 +453,10 @@ def run_pipeline(user_query: str) -> Dict[str, Any]:
     all_images: List[Dict[str, Any]] = []
 
     for sub_question in sub_questions:
-        retrieval_query = rephrase_query(sub_question)
-        chunks = retrieve_chunks(retrieval_query)
+        chunks = retrieve_chunks(sub_question)
         page_images = load_page_images_from_chunks(chunks)
         answer = answer_subquestion(
             sub_question=sub_question,
-            retrieval_query=retrieval_query,
             chunks=chunks,
             page_images=page_images,
         )
@@ -468,7 +464,6 @@ def run_pipeline(user_query: str) -> Dict[str, Any]:
         results.append(
             {
                 "sub_question": sub_question,
-                "retrieval_query": retrieval_query,
                 "chunks": chunks,
                 "page_images": page_images,
                 "answer": answer,
@@ -518,7 +513,6 @@ def render_debug(bundle: Dict[str, Any]) -> None:
     for idx, item in enumerate(bundle["results"], start=1):
         st.markdown(f"#### Sub-question {idx}")
         st.write(f"**Question:** {item['sub_question']}")
-        st.write(f"**Retrieval query:** {item['retrieval_query']}")
 
         if not item["chunks"]:
             st.warning("No chunks retrieved.")
