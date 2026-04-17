@@ -1,14 +1,15 @@
 # Multimodal Vector RAG
 
-A multimodal PDF ingestion pipeline for Retrieval-Augmented Generation (RAG).
+A multimodal PDF ingestion and retrieval pipeline for Retrieval-Augmented Generation (RAG).
 
-This repository focuses on the **document preparation layer** of a RAG system. It is built to convert complex PDFs into retrieval-ready knowledge by preserving page structure, visual meaning, and cross-page continuity before vector storage.
+This repository is a full end-to-end RAG system. It converts complex PDFs into retrieval-ready knowledge by preserving page structure, visual meaning, and cross-page continuity, stores them as embeddings in ChromaDB, and serves **grounded, verified answers** through a Streamlit chat UI.
 
-The current pipeline covers three core stages:
+The pipeline covers four stages:
 
 1. **Document Processing** — convert a PDF into page-wise Markdown while preserving figures, tables, and formulas through generated descriptions.
 2. **Page-Aware Chunking** — chunk Page N while using Page N+1 only as context to avoid breaking meaning at page boundaries.
 3. **Vectorization** — embed the final chunk text and store it in ChromaDB.
+4. **Retrieval & Grounded QA** — plan the user query, retrieve evidence per sub-question, draft grounded sub-answers with page screenshots, synthesize the final response, and verify every claim against retrieved evidence — all through a Streamlit chat UI.
 
 ---
 
@@ -32,6 +33,7 @@ That means:
 - visual asset preservation
 - boundary-aware chunking
 - cleaner embedding text for retrieval
+- answers that stay grounded in the actual page they came from
 
 ---
 
@@ -143,6 +145,77 @@ After chunking, the pipeline vectorizes the chunk text and stores it in ChromaDB
 ### Current storage config
 - Chroma path: `vector_db/chroma_db`
 - Collection name: `embeddings_db`
+- Distance metric: cosine
+
+---
+
+## 4. Retrieval & Grounded QA (`app.py`)
+
+After a PDF has been processed, chunked, and vectorized, `app.py` serves a **Streamlit chat UI** that takes a user question and returns a grounded, verified answer with page-level sources.
+
+The query pipeline is:
+
+```text
+User query
+ │
+ ├── Memory context   (rolling conversation summary + recent turns)
+ │
+ ├── Query planning   (control LLM, structured output → QueryPlan)
+ │     ├── standalone_query   (resolves follow-up references)
+ │     ├── answer_instructions
+ │     ├── sub_queries
+ │     └── retrieval_tasks
+ │
+ ├── For each retrieval task:
+ │     ├── embed the retrieval query
+ │     ├── Chroma similarity search (top-k)
+ │     ├── load page screenshots for retrieved chunks
+ │     └── grounded sub-answer  (subanswer LLM, multimodal, structured output → GroundedSubAnswer)
+ │           ├── supported  (bool)
+ │           ├── answer_markdown
+ │           └── source_pages
+ │
+ ├── Final synthesis   (final LLM, multimodal — combines sub-answers + deduped page images)
+ │
+ └── Verification      (control LLM — flags or rewrites unsupported claims → final_answer)
+```
+
+### What it does
+- maintains a rolling conversation memory (summary + raw window of recent turns)
+- resolves follow-up references in the user query ("what about those?") before retrieval
+- decomposes multi-part queries into independent retrieval tasks
+- retrieves the top `TOP_K` chunks per sub-question from ChromaDB
+- drafts each sub-answer with the matching **page screenshots** included as multimodal input — the answer must cite the exact pages it used
+- synthesizes the final answer from all grounded sub-answers
+- runs a verification pass that checks every claim against the retrieved evidence and rewrites the answer if any claim is unsupported
+- shows sources (page images) and a full debug expander in the UI — resolved query, retrieval plan, retrieved chunks, similarity scores
+
+### Key data models (pydantic)
+- `QueryPlan` — the planned decomposition of the user query
+- `RetrievalTask` — a `(sub_question, retrieval_query)` pair
+- `GroundedSubAnswer` — `{supported, answer_markdown, source_pages}`
+- `VerificationResult` — `{had_unsupported_claims, verification_issues, corrected_answer_markdown}`
+- `SplitTaskPlan` — used when a query is detected as multi-part and needs to be split further
+
+### Configuration (hardcoded in `app.py`)
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `EMBED_MODEL` | `text-embedding-3-large` | Query + chunk embeddings |
+| `CONTROL_MODEL` | `gpt-5.4-mini` | Query planning, memory summarization, verification |
+| `SUBANSWER_MODEL` | `gpt-5.4` | Per-sub-question grounded answer (multimodal) |
+| `FINAL_MODEL` | `gpt-5.4` (temp 0.1) | Final answer synthesis (multimodal) |
+| `CHROMA_PATH` | `vector_db/chroma_db` | Persistent Chroma directory |
+| `CHROMA_COLLECTION_NAME` | `embeddings_db` | Chroma collection |
+| `PAGE_IMAGES_DIR` | `sample_doc_assets/page_images` | Where page screenshots are loaded from |
+| `TOP_K` | `4` | Chunks retrieved per sub-question |
+| `SUMMARY_BATCH_SIZE` | `3` | Turns between rolling-summary updates |
+| `RAW_MEMORY_WINDOW` | `2` | Raw turns kept verbatim in memory context |
+
+> **Note:** `PAGE_IMAGES_DIR` is currently hardcoded to `sample_doc_assets/page_images`. If you ingest multiple PDFs, you will want to route this off the chunk metadata (`doc_assets_path`) instead.
+
+### Note on the vision model
+Stages 1 and 2 (ingestion + chunking) still use the vision model configured via `OPENAI_VISION_MODEL` (default `gpt-5.2`). Stage 4 uses its own retrieval-side models (`gpt-5.4`, `gpt-5.4-mini`) hardcoded in `app.py`.
 
 ---
 
@@ -150,10 +223,11 @@ After chunking, the pipeline vectorizes the chunk text and stores it in ChromaDB
 
 ```text
 multimodal_vector_rag/
-├── doc_processor.py
-├── chunking.py
-├── vectorization.py
-├── main.ipynb
+├── app.py                       # Streamlit chat UI + retrieval / QA pipeline
+├── doc_processor.py             # Stage 1 — PDF to page-wise Markdown
+├── chunking.py                  # Stage 2 — page-aware semantic chunking
+├── vectorization.py             # Stage 3 — embeddings + ChromaDB storage
+├── main.ipynb                   # Ingestion driver notebook (runs stages 1-3)
 ├── requirements.txt
 ├── sample.pdf
 ├── sample_doc_assets/
@@ -191,11 +265,22 @@ PDF
  │     ├── generate refreshed_content
  │     └── write page-wise JSON
  │
- └── Stage 3: Vectorization
-       ├── load chunk JSON files
-       ├── embed final text
-       ├── attach metadata
-       └── store in ChromaDB
+ ├── Stage 3: Vectorization
+ │     ├── load chunk JSON files
+ │     ├── embed final text
+ │     ├── attach metadata
+ │     └── store in ChromaDB
+ │
+ └── Stage 4: Retrieval & Grounded QA  (streamlit run app.py)
+       ├── build memory context
+       ├── plan the query → sub-queries + retrieval tasks
+       ├── per sub-question:
+       │     ├── embed → Chroma top-k
+       │     ├── load page screenshots
+       │     └── grounded sub-answer  (multimodal, structured)
+       ├── synthesize final answer  (multimodal)
+       ├── verify every claim against retrieved evidence
+       └── render answer + source page images + debug view
 ```
 
 ---
@@ -241,6 +326,11 @@ OPENAI_VISION_MODEL=gpt-5.2
 OPENAI_EMBED_MODEL=text-embedding-3-large
 ```
 
+- `OPENAI_API_KEY` is required.
+- `OPENAI_VISION_MODEL` is used by Stages 1 and 2 (defaults to `gpt-5.2`).
+- `OPENAI_EMBED_MODEL` is used by Stage 3 (defaults to `text-embedding-3-large`).
+- Stage 4 retrieval models (`gpt-5.4`, `gpt-5.4-mini`) are set inside `app.py` and can be changed there.
+
 ---
 
 ## Dependencies
@@ -260,7 +350,7 @@ Current pinned dependencies include:
 
 ## How to Run
 
-You can run the pipeline from `main.ipynb` or directly from Python.
+Stages 1–3 can be run from `main.ipynb` or directly from Python. Stage 4 is the Streamlit app.
 
 ## Step 1 — Process the PDF
 
@@ -287,11 +377,19 @@ count = ingest_chunks_to_chroma("sample.pdf")
 print(count)
 ```
 
+## Step 4 — Launch the chat app
+
+```bash
+streamlit run app.py
+```
+
+This opens the chat UI in your browser. Ask a question about the ingested PDF and the app will plan the query, retrieve the relevant chunks, draft grounded sub-answers with page screenshots, synthesize the final answer, and run a verification pass before displaying it.
+
 ---
 
 ## Example Output
 
-After running the pipeline you will have:
+After running Stages 1–3 you will have:
 - page screenshots
 - extracted figure/table/formula images
 - enriched page-wise Markdown
@@ -299,23 +397,10 @@ After running the pipeline you will have:
 - page-wise chunk JSON files
 - embeddings stored in ChromaDB
 
----
-
-## UI and Next Phase
-
-The current repository is centered on the ingestion and vectorization pipeline.
-
-A future app layer can sit on top of this backend and use:
-- processed Markdown
-- page images
-- page-wise chunk JSON files
-- ChromaDB metadata and embeddings
-
-That next layer can handle:
-- query-time retrieval
-- grounded answer generation
-- source page display
-- user-facing interaction through a Streamlit app
+After running Stage 4 (the Streamlit app) you will get:
+- a chat answer grounded in the PDF
+- the page images that were used as evidence
+- a debug expander showing the resolved query, the planned sub-queries, the retrieved chunks, and their similarity scores
 
 ---
 
@@ -336,17 +421,20 @@ The idea is to:
 
 ## Roadmap
 
-### Near-term
-- add retrieval layer
-- add a real UI
-- show grounded answers with page evidence
-- support question-answer flow over processed PDFs
+### Done
+- ingestion pipeline (Stages 1–3)
+- retrieval + grounded QA layer (Stage 4)
+- Streamlit chat UI with source page display and debug view
+- rolling conversation memory
+- grounded sub-answering with page screenshots as multimodal context
+- verification pass over every final answer
 
-### Next serious step
-- compare page-aware chunking against naive chunking baselines
-- add evaluation metrics
-- reduce latency and token cost
-- add caching and incremental processing
+### Near-term
+- **reduce end-to-end query latency** — parallel fan-out over sub-questions, batched embeddings, conditional verification
+- move to a LangGraph-based orchestration with subgraphs (planning subgraph + retrieval/QA subgraph with `Send` fan-out), and stream node-level updates to the UI
+- route `PAGE_IMAGES_DIR` off each chunk's `doc_assets_path` metadata so multiple PDFs work cleanly
+- add caching for repeated queries, embeddings, and page-image base64 encoding
+- add evaluation metrics and compare page-aware chunking against naive baselines
 
 ### Long-term
 - support more document types
@@ -361,4 +449,4 @@ This repository is based on one simple belief:
 
 > If you want better answers from RAG, start by building better chunks.
 
-That is what this project is trying to do.
+That is what this project is trying to do — from the first page of ingestion all the way through to the verified answer on screen.
